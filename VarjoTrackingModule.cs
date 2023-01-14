@@ -20,6 +20,9 @@ namespace VRCFTVarjoModule
         // 999 for min and -1 for max, to ensure these Values get overwritten the first runthrough
         private static double _minPupilSize = 999, _maxPupilSize = -1;
 
+        private static int logCount = 10;
+        public static StreamWriter sw = null;
+
         // This function parses the external module's single-eye data into a VRCFT-Parseable format
         public static void Update(ref Eye data, GazeRay external, float openness, GazeEyeStatus eyeStatus)
         {
@@ -48,6 +51,17 @@ namespace VRCFTVarjoModule
             Update(ref data.Left, external.leftEye, externalMeasurements.leftEyeOpenness, external.leftStatus);
             Update(ref data.Combined, external.gaze, (externalMeasurements.leftEyeOpenness + externalMeasurements.rightEyeOpenness) / 2, external.status);
 
+            if (logCount == 10)
+            {
+                VRCFaceTracking.Logger.Msg("Status: " + external.status + "\tLStatus: " + external.leftStatus.ToString().PadRight(11) + "\tLOpenness: " + externalMeasurements.leftEyeOpenness + "\tParsed LOpenness: " + data.Left.Openness);
+                if (sw != null)
+                {
+                    sw.WriteLine(DateTime.Now.ToString("HH:mm:ss") + ";" + external.status + ";" + external.leftStatus + ";" + externalMeasurements.leftEyeOpenness + ";" + data.Left.Openness + ";" + data.Left.Squeeze + ";" + data.Left.Widen + ";" + external.rightStatus + ";" + externalMeasurements.rightEyeOpenness + ";" + data.Right.Openness + ";" + data.Right.Squeeze + ";" + data.Right.Widen);
+                }
+                logCount = 0;
+            }
+            logCount++;
+
             // Determines whether the pupil Size/Eye dilation
             // If one is open and the other closed, we don't want the closed one to pull down the Values of the open one.
             double pupilSize = 0;
@@ -71,7 +85,7 @@ namespace VRCFTVarjoModule
                 data.EyesDilation = (float)calculateEyeDilation(ref pupilSize);
             }
             // Set the Pupil Diameter anyways
-            data.EyesPupilDiameter = (float)(pupilSize > 10 ? 1 : pupilSize / 10);
+            // data.EyesPupilDiameter = (float)(pupilSize > 10 ? 1 : pupilSize / 10);
         }
 
         // This function is used to calculate the Eye Dilation based on the lowest and highest measured Pupil Size
@@ -164,13 +178,25 @@ namespace VRCFTVarjoModule
                         ViewAccessor.SafeMemoryMappedViewHandle.AcquirePointer(ref ptr);
                         EyeImagePointer = new IntPtr(ptr);
                         UnifiedTrackingData.LatestEyeData.SupportsImage = true;
-                        UnifiedTrackingData.LatestEyeData.ImageSize = (2560, 800);
+                        UnifiedTrackingData.LatestEyeData.ImageSize = (1280, 400);
                     }
                     catch (FileNotFoundException)
                     {
                         Logger.Warning("Varjo camera mapped file doesn't exist; is Varjo Base running?");
                     }
                 }
+
+                string dirName = Path.Combine(Utils.PersistentDataDirectory, "Logs");
+                if (!Directory.Exists(dirName))
+                    Directory.CreateDirectory(dirName);
+
+                string filePath = Path.Combine(dirName, "VRCFTVarjo_" + DateTime.Now.ToString("yyyy-MM-dd") + ".csv");
+                bool fileExists = File.Exists(filePath);
+                TrackingData.sw = new StreamWriter(filePath, true);
+                TrackingData.sw.AutoFlush = true;
+
+                if (!fileExists)
+                    TrackingData.sw.WriteLine("Time;Tracking Status;Left Status;Left Varjo Openness;Left Parsed Openness;Left Parsed Squeeze;Left Parsed Widen;Right Status;Right Varjo Openness;Right Parsed Openness;Right Parsed Squeezed;Right Parsed Widen");
             }
             return (pipeConnected, false);
         }
@@ -222,6 +248,9 @@ namespace VRCFTVarjoModule
         // A chance to de-initialize everything. This runs synchronously inside main game thread. Do not touch any Unity objects here.
         public override void Teardown()
         {
+            TrackingData.sw.Flush();
+            TrackingData.sw.Close();
+
             _cancellationToken.Cancel();
             tracker.Teardown();
             ViewAccessor.SafeMemoryMappedViewHandle.ReleasePointer();
