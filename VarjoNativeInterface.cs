@@ -1,24 +1,29 @@
-﻿using System;
+﻿using Microsoft.Extensions.Logging;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
-using System.Threading.Tasks;
 using VRCFaceTracking;
 
 namespace VRCFTVarjoModule
 {
     class VarjoNativeInterface : VarjoInterface
     {
+        private static int varjo_PropertyKey_HMDProductName = 0xE002;
+        private static int varjo_PropertyKey_HMDSerialNumber = 0xE003;
+
         private IntPtr _session;
 
-        public override bool Initialize()
+        public override bool Initialize(ILogger loggerInstance)
         {
+            Logger = loggerInstance;
+
             if (!VarjoAvailable())
             {
-                Logger.Error("Varjo headset isn't detected");
+                Logger.LogError("Varjo headset isn't detected");
                 return false;
             }
             LoadLibrary();
@@ -29,7 +34,7 @@ namespace VRCFTVarjoModule
             }
             if (!varjo_IsGazeAllowed(_session))
             {
-                Logger.Error("Gaze tracking is not allowed! Please enable it in the Varjo Base!");
+                Logger.LogError("Gaze tracking is not allowed! Please enable it in the Varjo Base!");
                 return false;
             }
             varjo_GazeInit(_session);
@@ -39,7 +44,7 @@ namespace VRCFTVarjoModule
 
         public override void Teardown()
         {
-            //no need to tear down anything right?
+            varjo_SessionShutDown(_session);
         }
 
         public override void Update()
@@ -52,29 +57,41 @@ namespace VRCFTVarjoModule
             bool hasData = varjo_GetGazeData(_session, out gazeData, out eyeMeasurements);
 
             if (!hasData)
-                Logger.Msg("Error while getting Gaze Data");
+                Logger.LogWarning("Error while getting Gaze Data");
         }
-        public override string GetName()
+
+        public override string GetHMDName()
         {
-            return "native DLL";
+            int bufferSize = varjo_GetPropertyStringSize(_session, varjo_PropertyKey_HMDProductName);
+            StringBuilder buffer = new StringBuilder(bufferSize);
+            varjo_GetPropertyString(_session, varjo_PropertyKey_HMDProductName, buffer, bufferSize);
+
+            return buffer.ToString();
         }
 
         private bool LoadLibrary()
         {
             IEnumerable<string> dllPaths = ExtractAssemblies(new string[] { "Varjo.VarjoLib.dll" });
-            var path = dllPaths.First();
-            if (path == null)
+            if (dllPaths.Count() > 0)
             {
-                Logger.Error(string.Concat("Couldn't extract the library ", path));
+                var path = dllPaths.First();
+                if (path == null)
+                {
+                    Logger.LogError(string.Concat("Couldn't extract the library ", path));
+                    return false;
+                }
+                if (LoadLibrary(path) == IntPtr.Zero)
+                {
+                    Logger.LogError(string.Concat("Unable to load library ", path));
+                    return false;
+                }
+                Logger.LogInformation(string.Concat("Loaded library ", path));
+                return true;
+            }
+            else
+            {
                 return false;
             }
-            if (LoadLibrary(path) == IntPtr.Zero)
-            {
-                Logger.Error(string.Concat("Unable to load library ", path));
-                return false;
-            }
-            Logger.Msg(string.Concat("Loaded library ", path));
-            return true;
         }
 
 
@@ -113,7 +130,6 @@ namespace VRCFTVarjoModule
                     }
                     catch (Exception e)
                     {
-                        Logger.Error($"Failed to get DLL: " + e.Message);
                     }
                 }
             }
@@ -168,6 +184,12 @@ namespace VRCFTVarjoModule
 
         [DllImport("VarjoLib", CharSet = CharSet.Auto)]
         private static extern int varjo_GetPropertyInt(IntPtr session, int propertyKey);
+
+        [DllImport("VarjoLib", CharSet = CharSet.Ansi)]
+        private static extern void varjo_GetPropertyString(IntPtr session, int propertyKey, StringBuilder buffer, int bufferSize);
+
+        [DllImport("VarjoLib", CharSet = CharSet.Auto)]
+        private static extern int varjo_GetPropertyStringSize(IntPtr session, int propertyKey);
 
         [DllImport("VarjoLib", CharSet = CharSet.Auto)]
         private static extern void varjo_SyncProperties(IntPtr session);

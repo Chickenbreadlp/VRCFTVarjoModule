@@ -1,4 +1,5 @@
-﻿using System;
+﻿using Microsoft.Extensions.Logging;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -123,6 +124,7 @@ namespace VRCFTVarjoModule
     {
         protected GazeData gazeData;
         protected EyeMeasurements eyeMeasurements;
+        protected ILogger Logger;
 
         public GazeData GetGazeData()
         {
@@ -135,10 +137,10 @@ namespace VRCFTVarjoModule
         }
 
         public abstract void Teardown();
-        public abstract bool Initialize();
+        public abstract bool Initialize(ILogger loggerInstance);
         public abstract void Update();
 
-        public abstract string GetName();
+        public abstract string GetHMDName();
 
         protected string GetModuleDir()
         {
