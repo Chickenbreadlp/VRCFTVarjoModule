@@ -167,11 +167,13 @@ namespace VRCFTVarjoModule
         // The update function needs to be defined separately in case the user is running with the --vrcft-nothread launch parameter
         public override void Update()
         {
-            if (Status != ModuleState.Active)
+            if (Status == ModuleState.Active)
             {
                 tracker.Update();
                 TrackingData.Update(ref UnifiedTracking.Data.Eye, ref UnifiedTracking.Data.Shapes, tracker.GetGazeData(), tracker.GetEyeMeasurements());
             }
+
+            Thread.Sleep(10);
         }
 
         // A chance to de-initialize everything. This runs synchronously inside main game thread. Do not touch any Unity objects here.
