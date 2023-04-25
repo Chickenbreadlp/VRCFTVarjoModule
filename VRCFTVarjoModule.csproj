@@ -4,7 +4,7 @@
 	<EnableDefaultCompileItems>false</EnableDefaultCompileItems>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="VarjoInterface.cs" />
+    <Compile Include="VarjoTypes.cs" />
     <Compile Include="VarjoNativeInterface.cs" />
     <Compile Include="VarjoTrackingModule.cs" />
   </ItemGroup>

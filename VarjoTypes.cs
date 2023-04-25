@@ -1,12 +1,4 @@
-﻿using Microsoft.Extensions.Logging;
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
-using System.Runtime.InteropServices;
-using System.Text;
-using System.Threading.Tasks;
-using VRCFaceTracking;
+﻿using System.Runtime.InteropServices;
 
 namespace VRCFTVarjoModule
 {
@@ -119,40 +111,21 @@ namespace VRCFTVarjoModule
         public GazeEyeCalibrationQuality right;
     }
 
-
-    public abstract class VarjoInterface
+    public enum VarjoPropertyKey
     {
-        protected GazeData gazeData;
-        protected EyeMeasurements eyeMeasurements;
-        protected ILogger Logger;
-
-        public GazeData GetGazeData()
-        {
-            return gazeData;
-        }
-
-        public EyeMeasurements GetEyeMeasurements()
-        {
-            return eyeMeasurements;
-        }
-
-        public abstract void Teardown();
-        public abstract bool Initialize(ILogger loggerInstance);
-        public abstract void Update();
-
-        public abstract string GetHMDName();
-
-        protected string GetModuleDir()
-        {
-            return Utils.PersistentDataDirectory + "\\CustomLibs\\Varjo";
-        }
-
-        protected bool VarjoAvailable()
-        {
-            // totally not how the official Varjo library works under the hood
-            return File.Exists("\\\\.\\pipe\\Varjo\\InfoService");
-        }
-        
+        Invalid = 0x0,
+        UserPresence = 0x2000,
+        GazeCalibrating = 0xA000,
+        GazeCalibrated = 0xA001,
+        GazeCalibrationQuality = 0xA002,
+        GazeAllowed = 0xA003,
+        GazeEyeCalibrationQuality_Left = 0xA004,
+        GazeEyeCalibrationQuality_Right = 0xA005,
+        GazeIPDEstimate = 0xA010,
+        HMDConnected = 0xE001,
+        HMDProductName = 0xE002,
+        HMDSerialNumber = 0xE003,
+        MRAvailable = 0xD000
     }
 
 

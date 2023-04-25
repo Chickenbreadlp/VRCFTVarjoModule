@@ -10,14 +10,15 @@ using VRCFaceTracking;
 
 namespace VRCFTVarjoModule
 {
-    class VarjoNativeInterface : VarjoInterface
+    class VarjoNativeInterface
     {
-        private static int varjo_PropertyKey_HMDProductName = 0xE002;
-        private static int varjo_PropertyKey_HMDSerialNumber = 0xE003;
-
         private IntPtr _session;
+        protected GazeData gazeData;
+        protected EyeMeasurements eyeMeasurements;
+        protected ILogger Logger;
 
-        public override bool Initialize(ILogger loggerInstance)
+        #region Lifetime methods (Init, Update, Teardown)
+        public bool Initialize(ILogger loggerInstance)
         {
             Logger = loggerInstance;
 
@@ -26,31 +27,35 @@ namespace VRCFTVarjoModule
                 Logger.LogError("Varjo headset isn't detected");
                 return false;
             }
-            LoadLibrary();
-            _session = varjo_SessionInit();
-            if (_session == IntPtr.Zero)
+            if (LoadLibrary())
             {
-                return false;
+                _session = varjo_SessionInit();
+                if (_session == IntPtr.Zero)
+                {
+                    return false;
+                }
+                if (!varjo_IsGazeAllowed(_session))
+                {
+                    Logger.LogError("Gaze tracking is not allowed! Please enable it in the Varjo Base!");
+                    return false;
+                }
+                varjo_GazeInit(_session);
+                varjo_SyncProperties(_session);
+                return true;
             }
-            if (!varjo_IsGazeAllowed(_session))
-            {
-                Logger.LogError("Gaze tracking is not allowed! Please enable it in the Varjo Base!");
-                return false;
-            }
-            varjo_GazeInit(_session);
-            varjo_SyncProperties(_session);
-            return true;
+            return false;
         }
 
-        public override void Teardown()
+        public void Teardown()
         {
             varjo_SessionShutDown(_session);
         }
 
-        public override void Update()
+        // Get's the newest Data from the SDK and stores it internally
+        public bool Update()
         {
             if (_session == IntPtr.Zero)
-                return;
+                return false;
 
             // Get's GazeData and EyeMeasurements from the Varjo SDK
             // Return value states whether or not the request was successful (true = has Data; false = Error occured)
@@ -58,17 +63,33 @@ namespace VRCFTVarjoModule
 
             if (!hasData)
                 Logger.LogWarning("Error while getting Gaze Data");
+
+            return hasData;
+        }
+        #endregion
+
+        #region Public Getters
+        public GazeData GetGazeData()
+        {
+            return gazeData;
         }
 
-        public override string GetHMDName()
+        public EyeMeasurements GetEyeMeasurements()
         {
-            int bufferSize = varjo_GetPropertyStringSize(_session, varjo_PropertyKey_HMDProductName);
+            return eyeMeasurements;
+        }
+
+        public string GetHMDName()
+        {
+            int bufferSize = varjo_GetPropertyStringSize(_session, VarjoPropertyKey.HMDProductName);
             StringBuilder buffer = new StringBuilder(bufferSize);
-            varjo_GetPropertyString(_session, varjo_PropertyKey_HMDProductName, buffer, bufferSize);
+            varjo_GetPropertyString(_session, VarjoPropertyKey.HMDProductName, buffer, bufferSize);
 
             return buffer.ToString();
         }
+        #endregion
 
+        #region Internal helper methods
         private bool LoadLibrary()
         {
             IEnumerable<string> dllPaths = ExtractAssemblies(new string[] { "Varjo.VarjoLib.dll" });
@@ -96,7 +117,7 @@ namespace VRCFTVarjoModule
 
 
         // I can't ask nicely to add my DLL into the dependency list so I had to steal code from the main repo :(
-        private static IEnumerable<string> ExtractAssemblies(IEnumerable<string> resourceNames)
+        private IEnumerable<string> ExtractAssemblies(IEnumerable<string> resourceNames)
         {
             var extractedPaths = new List<string>();
 
@@ -130,6 +151,7 @@ namespace VRCFTVarjoModule
                     }
                     catch (Exception e)
                     {
+                        Logger.LogError($"Failed to get DLL: " + e.Message);
                     }
                 }
             }
@@ -143,6 +165,14 @@ namespace VRCFTVarjoModule
             return splitPath[1] + ".dll";
         }
 
+        private static bool VarjoAvailable()
+        {
+            // totally not how the official Varjo library works under the hood
+            return File.Exists("\\\\.\\pipe\\Varjo\\InfoService");
+        }
+        #endregion
+
+        #region DllImports
         [DllImport("kernel32", CharSet = CharSet.Unicode, ExactSpelling = false, SetLastError = true)]
         private static extern IntPtr LoadLibrary(string lpFileName);
 
@@ -180,19 +210,20 @@ namespace VRCFTVarjoModule
         private static extern void varjo_RequestGazeCalibration(IntPtr session);
 
         [DllImport("VarjoLib", CharSet = CharSet.Auto)]
-        private static extern bool varjo_GetPropertyBool(IntPtr session, int propertyKey);
+        private static extern bool varjo_GetPropertyBool(IntPtr session, VarjoPropertyKey propertyKey);
 
         [DllImport("VarjoLib", CharSet = CharSet.Auto)]
-        private static extern int varjo_GetPropertyInt(IntPtr session, int propertyKey);
+        private static extern int varjo_GetPropertyInt(IntPtr session, VarjoPropertyKey propertyKey);
 
         [DllImport("VarjoLib", CharSet = CharSet.Ansi)]
-        private static extern void varjo_GetPropertyString(IntPtr session, int propertyKey, StringBuilder buffer, int bufferSize);
+        private static extern void varjo_GetPropertyString(IntPtr session, VarjoPropertyKey propertyKey, StringBuilder buffer, int bufferSize);
 
         [DllImport("VarjoLib", CharSet = CharSet.Auto)]
-        private static extern int varjo_GetPropertyStringSize(IntPtr session, int propertyKey);
+        private static extern int varjo_GetPropertyStringSize(IntPtr session, VarjoPropertyKey propertyKey);
 
         [DllImport("VarjoLib", CharSet = CharSet.Auto)]
         private static extern void varjo_SyncProperties(IntPtr session);
+        #endregion
 
     }
 }
