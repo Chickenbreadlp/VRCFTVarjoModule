@@ -92,27 +92,19 @@ namespace VRCFTVarjoModule
         #region Internal helper methods
         private bool LoadLibrary()
         {
-            IEnumerable<string> dllPaths = ExtractAssemblies(new string[] { "Varjo.VarjoLib.dll" });
-            if (dllPaths.Count() > 0)
+            var path = System.IO.Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location) + "\\TrackingLibs\\VarjoLib.dll";
+            if (path == null)
             {
-                var path = dllPaths.First();
-                if (path == null)
-                {
-                    Logger.LogError(string.Concat("Couldn't extract the library ", path));
-                    return false;
-                }
-                if (LoadLibrary(path) == IntPtr.Zero)
-                {
-                    Logger.LogError(string.Concat("Unable to load library ", path));
-                    return false;
-                }
-                Logger.LogInformation(string.Concat("Loaded library ", path));
-                return true;
-            }
-            else
-            {
+                Logger.LogError(string.Concat("Couldn't extract the library ", path));
                 return false;
             }
+            if (LoadLibrary(path) == IntPtr.Zero)
+            {
+                Logger.LogError(string.Concat("Unable to load library ", path));
+                return false;
+            }
+            Logger.LogInformation(string.Concat("Loaded library ", path));
+            return true;
         }
 
 

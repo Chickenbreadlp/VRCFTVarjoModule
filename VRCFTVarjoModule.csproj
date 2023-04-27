@@ -14,7 +14,11 @@
     </Reference>
   </ItemGroup>
   <ItemGroup>
-    <EmbeddedResource Include="TrackingLibs\Varjo\VarjoLib.dll" />
+    <None Include="TrackingLibs\VarjoLib.dll">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+  <ItemGroup>
     <EmbeddedResource Include="Assets\*" />
   </ItemGroup>
   <ItemGroup>
