@@ -1,11 +1,12 @@
-﻿using System;
+﻿using Microsoft.Extensions.Logging;
+using System.Collections.Generic;
 using System.IO;
-using System.IO.MemoryMappedFiles;
-using System.Runtime.InteropServices;
 using System.Threading;
 using VRCFaceTracking;
-using VRCFaceTracking.Params;
-using Vector2 = VRCFaceTracking.Params.Vector2;
+using VRCFaceTracking.Core.Library;
+using VRCFaceTracking.Core.Params.Data;
+using VRCFaceTracking.Core.Params.Expressions;
+using VRCFaceTracking.Core.Types;
 
 namespace VRCFTVarjoModule
 {
@@ -26,243 +27,177 @@ namespace VRCFTVarjoModule
         // Threshold of the maximum opening in Eye Openness that will be tracked as long as the eye status is "invalid"
         private static readonly float MAX_OPENNESS_DEVIATION = 0.1f;
 
-        // 999 for min and -1 for max, to ensure these Values get overwritten the first runthrough
-        private static double _minPupilSize = 999, _maxPupilSize = -1;
-
-        // This function parses the external module's single-eye data into a VRCFT-Parseable format
-        public static void Update(ref Eye data, GazeRay external, float openness, GazeEyeStatus eyeStatus)
+        // Function to map a Varjo GazeRay to a Vector2 Ray for use in VRCFT
+        private static Vector2 GetGazeVector(GazeRay varjoGaze)
         {
-            if ((int)eyeStatus >= 2)
-            {
-                data.Look = new Vector2((float)external.forward.x, (float)external.forward.y);
-            }
-
-            parseOpenness(ref data, openness, eyeStatus >= GazeEyeStatus.Compensated);
+            return new Vector2((float)varjoGaze.forward.x, (float)varjoGaze.forward.y);
         }
 
-        public static void Update(ref Eye data, GazeRay external, float openness, GazeStatus combinedStatus)
+        // This function is used to disect the single Varjo Openness Float into a more managable Openness, Squeeze and Widen Value
+        // As the three Parameters are exclusive to one another (if one is between 0 or 1, the others have to be either 0 or 1), we only need to do maths for one parameter
+        // `openness` is returned as `-1` when VRCFT values should remain unchanged
+        private static (float openness, float squeeze, float widen) ParseOpenness(float currentOpenness, float externalOpenness, GazeEyeStatus eyeStatus)
         {
-            if (combinedStatus == GazeStatus.Valid)
-            {
-                data.Look = new Vector2((float)external.forward.x, (float)external.forward.y);
-            }
-
-            parseOpenness(ref data, openness, combinedStatus != GazeStatus.Invalid);
-        }
-
-        // This function parses the external module's full-data data into multiple VRCFT-Parseable single-eye structs
-        public static void Update(ref EyeTrackingData data, GazeData external, EyeMeasurements externalMeasurements)
-        {
-            Update(ref data.Right, external.rightEye, externalMeasurements.rightEyeOpenness, external.rightStatus);
-            Update(ref data.Left, external.leftEye, externalMeasurements.leftEyeOpenness, external.leftStatus);
-            Update(ref data.Combined, external.gaze, (externalMeasurements.leftEyeOpenness + externalMeasurements.rightEyeOpenness) / 2, external.status);
-
-            // Determines whether the pupil Size/Eye dilation
-            // If one is open and the other closed, we don't want the closed one to pull down the Values of the open one.
-            double pupilSize = 0;
-            // Casting the status as ints allows for easier comparison; as we need Compensated (2) or Tracked (3), that means >= 2
-            if ((int)external.leftStatus >= 2 && (int)external.rightStatus >= 2)
-            {
-                pupilSize = (externalMeasurements.leftPupilDiameterInMM + externalMeasurements.rightPupilDiameterInMM) / 2;
-            }
-            else if ((int)external.rightStatus >= 2)
-            {
-                pupilSize = externalMeasurements.rightPupilDiameterInMM;
-            }
-            else if ((int)external.leftStatus >= 2)
-            {
-                pupilSize = externalMeasurements.leftPupilDiameterInMM;
-            }
-
-            // Only set the Eye Dilation, if we actually have Pupil data
-            if (pupilSize > 0 && external.status == GazeStatus.Valid)
-            {
-                data.EyesDilation = (float)calculateEyeDilation(ref pupilSize);
-            }
-            // Set the Pupil Diameter anyways
-            data.EyesPupilDiameter = (float)(pupilSize > 10 ? 1 : pupilSize / 10);
-        }
-
-        // This function is used to calculate the Eye Dilation based on the lowest and highest measured Pupil Size
-        private static double calculateEyeDilation(ref double pupilSize)
-        {
-            // Adjust the bounds if Pupil Size exceeds the last thought maximum bounds
-            if (pupilSize > _maxPupilSize)
-            {
-                _maxPupilSize = pupilSize;
-            }
-            if (pupilSize < _minPupilSize)
-            {
-                _minPupilSize = pupilSize;
-            }
-
-            // In case both max and min are the same, we need to return 0.5; Don't wanna run into a divide by 0 situation ^^"
-            // We also don't want to run the maths if the pupil size bounds haven't been initialized yet...
-            if (_maxPupilSize == _minPupilSize || _maxPupilSize == -1)
-            {
-                return 0.5;
-            }
-
-            // Pretty typical number range convertion.
-            // We assume we want 1 for max dilation and 0 for min dilation; simplifies the maths a bit
-            return (pupilSize - _minPupilSize) / (_maxPupilSize - _minPupilSize);
-        }
-
-        // This function is used to disect the single Varjo Openness Float into the SRanipal Openness, Widen & Squeeze values
-        // As the three SRanipal Parameters are exclusive to one another (if one is between 0 or 1, the others have to be either 0 or 1), we only need to do maths for one parameter
-        private static void parseOpenness(ref Eye data, float openness, bool trackingValid)
-        {
-            float srOpenness;
+            float parsedOpenness;
+            float widen = 0;
+            float squeeze = 0;
             VarjoOpennessMode mode;
 
-
-            if (openness <= EYE_SQUEEZE_THRESHOLD)
+            // Check what range the Varjo Openness falls into and calculate the new "Openness"
+            if (externalOpenness <= EYE_SQUEEZE_THRESHOLD)
             {
-                srOpenness = 0;
+                parsedOpenness = 0;
                 mode = VarjoOpennessMode.Squeeze;
             }
-            else if (openness >= EYE_WIDEN_THRESHOLD)
+            else if (externalOpenness >= EYE_WIDEN_THRESHOLD)
             {
-                srOpenness = 1;
+                parsedOpenness = 1;
                 mode = VarjoOpennessMode.Widen;
             }
             else
             {
-                srOpenness = (openness - EYE_SQUEEZE_THRESHOLD) / (EYE_WIDEN_THRESHOLD - EYE_SQUEEZE_THRESHOLD);
+                parsedOpenness = (externalOpenness - EYE_SQUEEZE_THRESHOLD) / (EYE_WIDEN_THRESHOLD - EYE_SQUEEZE_THRESHOLD);
                 mode = VarjoOpennessMode.Openness;
             }
 
-            if (trackingValid || srOpenness < data.Openness + MAX_OPENNESS_DEVIATION)
+            // Check if new Openness is within allowable margin
+            if (eyeStatus >= GazeEyeStatus.Compensated || parsedOpenness < currentOpenness + MAX_OPENNESS_DEVIATION)
             {
-                data.Openness = srOpenness;
-
-                switch(mode)
+                // ...and calculate squeeze/widen if called for
+                switch (mode)
                 {
                     case VarjoOpennessMode.Squeeze:
-                        data.Squeeze = (openness / -EYE_SQUEEZE_THRESHOLD) + 1;
-                        data.Widen = 0;
+                        squeeze = (externalOpenness / -EYE_SQUEEZE_THRESHOLD) + 1;
                         break;
                     case VarjoOpennessMode.Widen:
-                        data.Squeeze = 0;
-                        data.Widen = (openness - EYE_WIDEN_THRESHOLD) / (1 - EYE_WIDEN_THRESHOLD);
-                        break;
-                    default:
-                        data.Squeeze = 0;
-                        data.Widen = 0;
+                        widen = (externalOpenness - EYE_WIDEN_THRESHOLD) / (1 - EYE_WIDEN_THRESHOLD);
                         break;
                 }
             }
+            else
+            {
+                // Otherwise set the openness to -1 to indicate no changes
+                parsedOpenness = -1;
+            }
+
+            return (parsedOpenness, squeeze, widen);
         }
 
+        // Main Update function
+        // Mapps Varjo Eye Data to VRCFT Parameters
+        public static void Update(ref UnifiedEyeData data, ref UnifiedExpressionShape[] expressionData, GazeData external, EyeMeasurements externalMeasurements)
+        {
+            // Set the Gaze and Pupil Size for each eye when their status is somewhat reliable according to the SDK
+            if (external.rightStatus >= GazeEyeStatus.Compensated)
+            {
+                data.Right.Gaze = GetGazeVector(external.rightEye);
+                data.Right.PupilDiameter_MM = externalMeasurements.rightPupilDiameterInMM;
+            }
+            if (external.leftStatus >= GazeEyeStatus.Compensated)
+            {
+                data.Left.Gaze = GetGazeVector(external.leftEye);
+                data.Left.PupilDiameter_MM = externalMeasurements.leftPupilDiameterInMM;
+            }
+
+            // Parse Openness as before, but instead of writing them immideatly, we store them in variables temporarely
+            (float rightOpenness, float rightSqueeze, float rightWiden) = ParseOpenness(data.Right.Openness, externalMeasurements.rightEyeOpenness, external.rightStatus);
+            (float leftOpenness, float leftSqueeze, float leftWiden) = ParseOpenness(data.Left.Openness, externalMeasurements.leftEyeOpenness, external.leftStatus);
+
+            // Set Openness Values for each eye; if they should change
+            if (rightOpenness >= 0.0f)
+            {
+                data.Right.Openness = rightOpenness;
+                expressionData[(int)UnifiedExpressions.EyeWideRight].Weight = rightWiden;
+                expressionData[(int)UnifiedExpressions.EyeSquintRight].Weight = rightSqueeze;
+
+                // Duplicated like on the SRanipal Module
+                expressionData[(int)UnifiedExpressions.BrowInnerUpRight].Weight = rightWiden;
+                expressionData[(int)UnifiedExpressions.BrowOuterUpRight].Weight = rightWiden;
+                expressionData[(int)UnifiedExpressions.BrowPinchRight].Weight = rightSqueeze;
+                expressionData[(int)UnifiedExpressions.BrowLowererRight].Weight = rightSqueeze;
+            }
+            if (leftOpenness >= 0.0f)
+            {
+                data.Left.Openness = leftOpenness;
+                expressionData[(int)UnifiedExpressions.EyeWideLeft].Weight = leftWiden;
+                expressionData[(int)UnifiedExpressions.EyeSquintLeft].Weight = leftSqueeze;
+
+                // Duplicated like on the SRanipal Module
+                expressionData[(int)UnifiedExpressions.BrowInnerUpLeft].Weight = leftWiden;
+                expressionData[(int)UnifiedExpressions.BrowOuterUpLeft].Weight = leftWiden;
+                expressionData[(int)UnifiedExpressions.BrowPinchLeft].Weight = leftSqueeze;
+                expressionData[(int)UnifiedExpressions.BrowLowererLeft].Weight = leftSqueeze;
+            }
+        }
     }
     
     public class VarjoTrackingModule : ExtTrackingModule 
     {
-        private static VarjoInterface tracker;
-        private static CancellationTokenSource _cancellationToken;
+        private static VarjoNativeInterface tracker;
 
+        // Mark this module as only supporting Eye Tracking
+        public override (bool SupportsEye, bool SupportsExpression) Supported => (true, false);
 
-        // eye image stuff
-        private MemoryMappedFile MemMapFile;
-        private MemoryMappedViewAccessor ViewAccessor;
-        private IntPtr EyeImagePointer;
-        // Values for the Camera buffer size in VRCFT
-#if GEN3HMD
-        private static readonly int CAMERA_WIDTH = 1280, CAMERA_HEIGHT = 400; // 3rd Gen Varjo HMDs (VR-3, XR-3, Aero)
-#else
-        private static readonly int CAMERA_WIDTH = 2560, CAMERA_HEIGHT = 800; // 1st & 2nd Gen Varjo HMDs (VR-1, VR-2, XR-1)
-#endif
-
-
-        public override (bool SupportsEye, bool SupportsLip) Supported => (true, false);
-
-        // Synchronous module initialization. Take as much time as you need to initialize any external modules. This runs in the init-thread
-        public override (bool eyeSuccess, bool lipSuccess) Initialize(bool eye, bool lip)
+        // Prepares the Varjo Interface for communication with the SDK and sets module display name and icon
+        public override (bool eyeSuccess, bool expressionSuccess) Initialize(bool eye, bool lip)
         {
-            if (IsStandalone())
-            {
-                tracker = new VarjoNativeInterface();
-            }
-            else
-            {
-                tracker = new VarjoCompanionInterface();
-            }
-            Logger.Msg(string.Format("Initializing {0} Varjo module", tracker.GetName()));
-            bool pipeConnected = tracker.Initialize();
+            // Init our tracker first
+            tracker = new VarjoNativeInterface();
+            bool pipeConnected = tracker.Initialize(Logger);
+
             if (pipeConnected)
             {
-                unsafe
+                // if the tracker has init'ed, get the first 4 chars of the HMD name for Icon and Module name (for VR-#, XR-# or AERO)
+                string hmdName = tracker.GetHMDName().Substring(0, 4);
+
+                // in case we're dealing with the Aero, capitilize the name properly
+                if (hmdName == "AERO") hmdName = "Aero";
+                var hmdIcon = GetType().Assembly.GetManifestResourceStream("VRCFTVarjoModule.Assets." + hmdName + ".png");
+
+                // if no icon can be found the the reported HMD, use defaults and log the full name
+                if (hmdIcon == null)
                 {
-                    try
-                    {
-                        MemMapFile = MemoryMappedFile.OpenExisting("Global\\VarjoTrackerInfo");
-                        ViewAccessor = MemMapFile.CreateViewAccessor();
-                        byte* ptr = null;
-                        ViewAccessor.SafeMemoryMappedViewHandle.AcquirePointer(ref ptr);
-                        EyeImagePointer = new IntPtr(ptr);
-                        UnifiedTrackingData.LatestEyeData.SupportsImage = true;
-                        UnifiedTrackingData.LatestEyeData.ImageSize = (CAMERA_WIDTH, CAMERA_HEIGHT);
-                    }
-                    catch (FileNotFoundException)
-                    {
-                        Logger.Warning("Varjo camera mapped file doesn't exist; is Varjo Base running?");
-                    }
+                    Logger.LogInformation("Unknown HMD Name: " + tracker.GetHMDName());
+                    ModuleInformation.Name = "Varjo Eye Tracking";
+                    hmdIcon = GetType().Assembly.GetManifestResourceStream("VRCFTVarjoModule.Assets.unknown.png");
                 }
+                else
+                {
+                    ModuleInformation.Name = "Varjo " + hmdName + " Eye Tracking";
+                }
+
+                ModuleInformation.StaticImages = hmdIcon != null ? new List<Stream> { hmdIcon } : ModuleInformation.StaticImages;
             }
+
+            // Tell the lib manager our result with the init and that we (again) do not support Lip Tracking
             return (pipeConnected, false);
         }
 
-        // Detects if the module is running in the standalone version of VRCFT
-        private bool IsStandalone()
+        // Update function to be called in a while(true) loop. Keeping a delay is necessary to not fully load an entire CPU thread! (despite what the docs state)
+        public override void Update()
         {
-            return true; // uuuh that will do anyway
-        }
-
-        // This will be run in the tracking thread. This is exposed so you can control when and if the tracking data is updated down to the lowest level.
-        public override Action GetUpdateThreadFunc()
-        {
-            _cancellationToken = new CancellationTokenSource();
-            return () =>
+            if (Status == ModuleState.Active)
             {
-                while (!_cancellationToken.IsCancellationRequested)
+                // try and update data; log an error on failure and wait 250ms
+                if (tracker.Update())
                 {
-                    Update();
-                    Thread.Sleep(10);
+                    TrackingData.Update(ref UnifiedTracking.Data.Eye, ref UnifiedTracking.Data.Shapes, tracker.GetGazeData(), tracker.GetEyeMeasurements());
                 }
-            };
+                else
+                {
+                    Logger.LogWarning("There seems to be an issue with getting Tracking data. Will try again in 250ms.");
+                    Thread.Sleep(240);
+                }
+            }
+
+            // Sleep the thread for 10ms (aka let the update run at 100Hz)
+            Thread.Sleep(10);
         }
 
-        private unsafe void UpdateEyeImage()
-        {
-            if (MemMapFile == null || EyeImagePointer == null || !UnifiedTrackingData.LatestEyeData.SupportsImage)
-            {
-                return;
-            }
-            if (UnifiedTrackingData.LatestEyeData.ImageData == null)
-            {
-                UnifiedTrackingData.LatestEyeData.ImageData = new byte[CAMERA_WIDTH * CAMERA_HEIGHT];
-            }
-            Marshal.Copy(EyeImagePointer, UnifiedTrackingData.LatestEyeData.ImageData, 0, CAMERA_WIDTH * CAMERA_HEIGHT);
-        }
-
-        // The update function needs to be defined separately in case the user is running with the --vrcft-nothread launch parameter
-        public void Update()
-        {
-            if (Status.EyeState == ModuleState.Active)
-            {
-                tracker.Update();
-                TrackingData.Update(ref UnifiedTrackingData.LatestEyeData, tracker.GetGazeData(), tracker.GetEyeMeasurements());
-            }
-            UpdateEyeImage();
-        }
-
-        // A chance to de-initialize everything. This runs synchronously inside main game thread. Do not touch any Unity objects here.
+        // Function to be called when the module is torn down; this call should be passed through to the Varjo Interface
         public override void Teardown()
         {
-            _cancellationToken.Cancel();
             tracker.Teardown();
-            ViewAccessor.SafeMemoryMappedViewHandle.ReleasePointer();
-            _cancellationToken.Dispose();
         }
     }
 }
