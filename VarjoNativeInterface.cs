@@ -107,56 +107,6 @@ namespace VRCFTVarjoModule
             return true;
         }
 
-
-        // I can't ask nicely to add my DLL into the dependency list so I had to steal code from the main repo :(
-        private IEnumerable<string> ExtractAssemblies(IEnumerable<string> resourceNames)
-        {
-            var extractedPaths = new List<string>();
-
-            var dirName = Path.Combine(Utils.PersistentDataDirectory, "StockLibs");
-            if (!Directory.Exists(dirName))
-                Directory.CreateDirectory(dirName);
-
-            foreach (var dll in resourceNames)
-            {
-                var dllPath = Path.Combine(dirName, GetAssemblyNameFromPath(dll));
-
-                using (var stm = Assembly.GetAssembly(typeof(VarjoNativeInterface)).GetManifestResourceStream("VRCFTVarjoModule.TrackingLibs." + dll))
-                {
-                    try
-                    {
-                        using (Stream outFile = File.Create(dllPath))
-                        {
-                            const int sz = 4096;
-                            var buf = new byte[sz];
-                            while (true)
-                            {
-                                if (stm == null) continue;
-                                var nRead = stm.Read(buf, 0, sz);
-                                if (nRead < 1)
-                                    break;
-                                outFile.Write(buf, 0, nRead);
-                            }
-                        }
-
-                        extractedPaths.Add(dllPath);
-                    }
-                    catch (Exception e)
-                    {
-                        Logger.LogError($"Failed to get DLL: " + e.Message);
-                    }
-                }
-            }
-            return extractedPaths;
-        }
-
-        private static string GetAssemblyNameFromPath(string path)
-        {
-            var splitPath = path.Split('.').ToList();
-            splitPath.Reverse();
-            return splitPath[1] + ".dll";
-        }
-
         private static bool VarjoAvailable()
         {
             // totally not how the official Varjo library works under the hood
