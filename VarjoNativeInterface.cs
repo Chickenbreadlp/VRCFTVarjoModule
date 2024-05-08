@@ -1,12 +1,9 @@
 ﻿using Microsoft.Extensions.Logging;
 using System;
-using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
-using VRCFaceTracking;
 
 namespace VRCFTVarjoModule
 {
@@ -41,6 +38,7 @@ namespace VRCFTVarjoModule
                 }
                 varjo_GazeInit(_session);
                 varjo_SyncProperties(_session);
+
                 return true;
             }
             return false;
@@ -51,7 +49,10 @@ namespace VRCFTVarjoModule
             varjo_SessionShutDown(_session);
         }
 
-        // Get's the newest Data from the SDK and stores it internally
+        /// <summary>
+        /// Get's the newest Data from the SDK and stores it internally
+        /// </summary>
+        /// <returns>true when the data fetching was successful</returns>
         public bool Update()
         {
             if (_session == IntPtr.Zero)
@@ -87,12 +88,28 @@ namespace VRCFTVarjoModule
 
             return buffer.ToString();
         }
+
+        public string GetVBVersion()
+        {
+            string returnVal = "";
+            try
+            {
+                IntPtr versionPtr = varjo_GetVersionString();
+                string version = Marshal.PtrToStringAnsi(versionPtr);
+                if (version != null)
+                {
+                    returnVal = version;
+                }
+            }
+            catch { }
+            return returnVal;
+        }
         #endregion
 
         #region Internal helper methods
         private bool LoadLibrary()
         {
-            var path = System.IO.Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location) + "\\TrackingLibs\\VarjoLib.dll";
+            var path = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location) + "\\TrackingLibs\\VarjoLib.dll";
             if (path == null)
             {
                 Logger.LogError(string.Concat("Couldn't extract the library ", path));
@@ -162,6 +179,9 @@ namespace VRCFTVarjoModule
 
         [DllImport("VarjoLib", CharSet = CharSet.Auto)]
         private static extern int varjo_GetPropertyStringSize(IntPtr session, VarjoPropertyKey propertyKey);
+
+        [DllImport("VarjoLib", CharSet = CharSet.Auto)]
+        private static extern IntPtr varjo_GetVersionString();
 
         [DllImport("VarjoLib", CharSet = CharSet.Auto)]
         private static extern void varjo_SyncProperties(IntPtr session);

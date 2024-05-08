@@ -14,77 +14,94 @@ namespace VRCFTVarjoModule
     // This class contains the overrides for any VRCFT Tracking Data struct functions
     public static class TrackingData
     {
-        enum VarjoOpennessMode : byte
-        {
-            Squeeze = 0,
-            Openness = 1,
-            Widen = 2
-        }
+        internal static ConfigManager Config { get; set; }
 
-        // Magic numbers to disect the 0-1 Varjo Openness float into SRanipal Openness, Widen & Squeeze values
-        // Based on Testing from @Chickenbread; may need adjusting
-        private static readonly float EYE_SQUEEZE_THRESHOLD = 0.15f, EYE_WIDEN_THRESHOLD = 0.90f;
-        // Threshold of the maximum opening in Eye Openness that will be tracked as long as the eye status is "invalid"
-        private static readonly float MAX_OPENNESS_DEVIATION = 0.1f;
-
-        // Function to map a Varjo GazeRay to a Vector2 Ray for use in VRCFT
+        /// <summary>
+        /// Function to map a Varjo GazeRay to a Vector2 Ray for use in VRCFT
+        /// </summary>
+        /// <param name="varjoGaze"></param>
+        /// <returns></returns>
         private static Vector2 GetGazeVector(GazeRay varjoGaze)
         {
             return new Vector2((float)varjoGaze.forward.x, (float)varjoGaze.forward.y);
         }
 
-        // This function is used to disect the single Varjo Openness Float into a more managable Openness, Squeeze and Widen Value
-        // As the three Parameters are exclusive to one another (if one is between 0 or 1, the others have to be either 0 or 1), we only need to do maths for one parameter
-        // `openness` is returned as `-1` when VRCFT values should remain unchanged
+        /// <summary>
+        /// This function is used to disect the single Varjo Openness Float into a more managable Openness, Squeeze and Widen Value
+        /// As the three Parameters are exclusive to one another (if one is between 0 or 1, the others have to be either 0 or 1), we only need to do maths for one parameter
+        /// `openness` is returned as `-1` when VRCFT values should remain unchanged
+        /// </summary>
+        /// <param name="currentOpenness">Current openness value from VRCFT</param>
+        /// <param name="externalOpenness">Recorded openness value from Varjo</param>
+        /// <param name="eyeStatus">Tracking status of the eye</param>
+        /// <returns></returns>
         private static (float openness, float squeeze, float widen) ParseOpenness(float currentOpenness, float externalOpenness, GazeEyeStatus eyeStatus)
         {
             float parsedOpenness;
-            float widen = 0;
-            float squeeze = 0;
-            VarjoOpennessMode mode;
+            float widen = 0f;
+            float squeeze = 0f;
 
-            // Check what range the Varjo Openness falls into and calculate the new "Openness"
-            if (externalOpenness <= EYE_SQUEEZE_THRESHOLD)
+            // Check what range the Varjo Openness falls into and calculate the new "Openness" (ignore widen/squeeze thresholds when they are the respective max values)
+            if (Config.squeezeThreshold > 0f && externalOpenness <= Config.squeezeThreshold)
             {
-                parsedOpenness = 0;
-                mode = VarjoOpennessMode.Squeeze;
+                parsedOpenness = 0f;
+                squeeze = (externalOpenness / -Config.squeezeThreshold) + 1;
             }
-            else if (externalOpenness >= EYE_WIDEN_THRESHOLD)
+            else if (Config.widenThreshold < 1f && externalOpenness >= Config.widenThreshold)
             {
-                parsedOpenness = 1;
-                mode = VarjoOpennessMode.Widen;
+                parsedOpenness = 1f;
+                widen = (externalOpenness - Config.widenThreshold) / (1 - Config.widenThreshold);
             }
             else
             {
-                parsedOpenness = (externalOpenness - EYE_SQUEEZE_THRESHOLD) / (EYE_WIDEN_THRESHOLD - EYE_SQUEEZE_THRESHOLD);
-                mode = VarjoOpennessMode.Openness;
+                parsedOpenness = (externalOpenness - Config.squeezeThreshold) / Config.opennessRange;
             }
 
-            // Check if new Openness is within allowable margin
-            if (eyeStatus >= GazeEyeStatus.Compensated || parsedOpenness < currentOpenness + MAX_OPENNESS_DEVIATION)
+            // filter openness value if configured
+            switch (Config.opennessStrategy)
             {
-                // ...and calculate squeeze/widen if called for
-                switch (mode)
-                {
-                    case VarjoOpennessMode.Squeeze:
-                        squeeze = (externalOpenness / -EYE_SQUEEZE_THRESHOLD) + 1;
+                case OpennessStrategy.RestrictedSpeed:
+                    {
+                        // Check if new Openness is within allowable margin
+                        if (eyeStatus <= GazeEyeStatus.Visible && parsedOpenness >= currentOpenness + Config.maxOpenSpeed)
+                        {
+                            // And if not set the openness to -1 to indicate no changes
+                            parsedOpenness = -1f;
+                        }
                         break;
-                    case VarjoOpennessMode.Widen:
-                        widen = (externalOpenness - EYE_WIDEN_THRESHOLD) / (1 - EYE_WIDEN_THRESHOLD);
+                    }
+                case OpennessStrategy.Hybrid:
+                    {
+                        if (eyeStatus == GazeEyeStatus.Compensated && parsedOpenness > 0.75f)
+                        {
+                            parsedOpenness = 0.75f;
+                            widen = 0;
+                        }
+                        else if (eyeStatus == GazeEyeStatus.Visible && parsedOpenness > 0.5f)
+                        {
+                            parsedOpenness = 0.5f;
+                            widen = 0;
+                        }
+                        else if (eyeStatus == GazeEyeStatus.Invalid && parsedOpenness > 0.25f)
+                        {
+                            parsedOpenness = 0.25f;
+                            widen = 0;
+                        }
                         break;
-                }
-            }
-            else
-            {
-                // Otherwise set the openness to -1 to indicate no changes
-                parsedOpenness = -1;
+                    }
             }
 
             return (parsedOpenness, squeeze, widen);
         }
 
-        // Main Update function
-        // Mapps Varjo Eye Data to VRCFT Parameters
+        /// <summary>
+        /// Main Update function
+        /// Mapps Varjo Eye Data to VRCFT Parameters
+        /// </summary>
+        /// <param name="data">Primary VRCFT gaza data object</param>
+        /// <param name="expressionData">VRCFT expression data object</param>
+        /// <param name="external">Varjo Gaze data object</param>
+        /// <param name="externalMeasurements">Auxillary Varjo measurements object</param>
         public static void Update(ref UnifiedEyeData data, ref UnifiedExpressionShape[] expressionData, GazeData external, EyeMeasurements externalMeasurements)
         {
             // Set the Gaze and Pupil Size for each eye when their status is somewhat reliable according to the SDK
@@ -99,34 +116,50 @@ namespace VRCFTVarjoModule
                 data.Left.PupilDiameter_MM = externalMeasurements.leftPupilDiameterInMM;
             }
 
-            // Parse Openness as before, but instead of writing them immideatly, we store them in variables temporarely
-            (float rightOpenness, float rightSqueeze, float rightWiden) = ParseOpenness(data.Right.Openness, externalMeasurements.rightEyeOpenness, external.rightStatus);
-            (float leftOpenness, float leftSqueeze, float leftWiden) = ParseOpenness(data.Left.Openness, externalMeasurements.leftEyeOpenness, external.leftStatus);
-
-            // Set Openness Values for each eye; if they should change
-            if (rightOpenness >= 0.0f)
+            // Parse openness as boolean or float depending on config
+            switch (Config.opennessStrategy)
             {
-                data.Right.Openness = rightOpenness;
-                expressionData[(int)UnifiedExpressions.EyeWideRight].Weight = rightWiden;
-                expressionData[(int)UnifiedExpressions.EyeSquintRight].Weight = rightSqueeze;
+                case OpennessStrategy.Bool:
+                    data.Right.Openness = external.rightStatus >= GazeEyeStatus.Compensated ? 1f : 0f;
+                    data.Left.Openness = external.leftStatus >= GazeEyeStatus.Compensated ? 1f : 0f;
+                    break;
 
-                // Duplicated like on the SRanipal Module
-                expressionData[(int)UnifiedExpressions.BrowInnerUpRight].Weight = rightWiden;
-                expressionData[(int)UnifiedExpressions.BrowOuterUpRight].Weight = rightWiden;
-                expressionData[(int)UnifiedExpressions.BrowPinchRight].Weight = rightSqueeze;
-                expressionData[(int)UnifiedExpressions.BrowLowererRight].Weight = rightSqueeze;
-            }
-            if (leftOpenness >= 0.0f)
-            {
-                data.Left.Openness = leftOpenness;
-                expressionData[(int)UnifiedExpressions.EyeWideLeft].Weight = leftWiden;
-                expressionData[(int)UnifiedExpressions.EyeSquintLeft].Weight = leftSqueeze;
+                case OpennessStrategy.Stepped:
+                    data.Right.Openness = (float)external.rightStatus / 3f;
+                    data.Left.Openness = (float)external.leftStatus / 3f;
+                    break;
 
-                // Duplicated like on the SRanipal Module
-                expressionData[(int)UnifiedExpressions.BrowInnerUpLeft].Weight = leftWiden;
-                expressionData[(int)UnifiedExpressions.BrowOuterUpLeft].Weight = leftWiden;
-                expressionData[(int)UnifiedExpressions.BrowPinchLeft].Weight = leftSqueeze;
-                expressionData[(int)UnifiedExpressions.BrowLowererLeft].Weight = leftSqueeze;
+                default:
+                    // Parse Openness and store them in temporary variables
+                    (float rightOpenness, float rightSqueeze, float rightWiden) = ParseOpenness(data.Right.Openness, externalMeasurements.rightEyeOpenness, external.rightStatus);
+                    (float leftOpenness, float leftSqueeze, float leftWiden) = ParseOpenness(data.Left.Openness, externalMeasurements.leftEyeOpenness, external.leftStatus);
+
+                    // Set Openness Values for each eye; if they should change
+                    if (rightOpenness >= 0.0f)
+                    {
+                        data.Right.Openness = rightOpenness;
+                        expressionData[(int)UnifiedExpressions.EyeWideRight].Weight = rightWiden;
+                        expressionData[(int)UnifiedExpressions.EyeSquintRight].Weight = rightSqueeze;
+
+                        // Duplicated like on the SRanipal Module
+                        expressionData[(int)UnifiedExpressions.BrowInnerUpRight].Weight = rightWiden;
+                        expressionData[(int)UnifiedExpressions.BrowOuterUpRight].Weight = rightWiden;
+                        expressionData[(int)UnifiedExpressions.BrowPinchRight].Weight = rightSqueeze;
+                        expressionData[(int)UnifiedExpressions.BrowLowererRight].Weight = rightSqueeze;
+                    }
+                    if (leftOpenness >= 0.0f)
+                    {
+                        data.Left.Openness = leftOpenness;
+                        expressionData[(int)UnifiedExpressions.EyeWideLeft].Weight = leftWiden;
+                        expressionData[(int)UnifiedExpressions.EyeSquintLeft].Weight = leftSqueeze;
+
+                        // Duplicated like on the SRanipal Module
+                        expressionData[(int)UnifiedExpressions.BrowInnerUpLeft].Weight = leftWiden;
+                        expressionData[(int)UnifiedExpressions.BrowOuterUpLeft].Weight = leftWiden;
+                        expressionData[(int)UnifiedExpressions.BrowPinchLeft].Weight = leftSqueeze;
+                        expressionData[(int)UnifiedExpressions.BrowLowererLeft].Weight = leftSqueeze;
+                    }
+                    break;
             }
         }
     }
@@ -134,6 +167,7 @@ namespace VRCFTVarjoModule
     public class VarjoTrackingModule : ExtTrackingModule 
     {
         private static VarjoNativeInterface tracker;
+        private static ConfigManager config;
 
         // Mark this module as only supporting Eye Tracking
         public override (bool SupportsEye, bool SupportsExpression) Supported => (true, false);
@@ -141,6 +175,11 @@ namespace VRCFTVarjoModule
         // Prepares the Varjo Interface for communication with the SDK and sets module display name and icon
         public override (bool eyeSuccess, bool expressionSuccess) Initialize(bool eye, bool lip)
         {
+            // as the very first thing: Init the config manager
+            config = new ConfigManager(Logger);
+            Logger.LogInformation($"Testing Config: {config.readDelay}");
+            TrackingData.Config = config;
+
             // Init our tracker first
             tracker = new VarjoNativeInterface();
             bool pipeConnected = tracker.Initialize(Logger);
@@ -185,13 +224,13 @@ namespace VRCFTVarjoModule
                 }
                 else
                 {
-                    Logger.LogWarning("There seems to be an issue with getting Tracking data. Will try again in 250ms.");
-                    Thread.Sleep(240);
+                    Logger.LogWarning("There seems to be an issue with getting Tracking data. Will try again in 1 second.");
+                    Thread.Sleep(990);
                 }
             }
 
-            // Sleep the thread for 10ms (aka let the update run at 100Hz)
-            Thread.Sleep(10);
+            // Sleep the thread for a predetermined time
+            Thread.Sleep(config.readDelay);
         }
 
         // Function to be called when the module is torn down; this call should be passed through to the Varjo Interface
