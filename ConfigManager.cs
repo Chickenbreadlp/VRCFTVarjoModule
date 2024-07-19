@@ -15,6 +15,7 @@ namespace VRCFTVarjoModule
 
         protected bool shouldCreateLink;
         public int readDelay {  get; protected set; }
+        public uint stabalizingCycles { get; protected set; }
         public OpennessStrategy opennessStrategy { get; protected set; }
 
         // Magic numbers for float lid parsing
@@ -46,6 +47,7 @@ namespace VRCFTVarjoModule
         {
             shouldCreateLink = true;
             readDelay = 10;
+            stabalizingCycles = 0;
             opennessStrategy = OpennessStrategy.RestrictedSpeed;
             squeezeThreshold = 0.15f;
             widenThreshold = 0.9f;
@@ -75,6 +77,12 @@ namespace VRCFTVarjoModule
                 fs.WriteLine("; Double Time is an experimental option which lets the module read from the SDK 2x normal (200Hz)");
                 fs.WriteLine("; This setting will do nothing but increase CPU time on VB versions older then 4.1");
                 fs.WriteLine($"DoubleTime={readDelay == 5}");
+
+                fs.WriteLine("");
+                fs.WriteLine("; Stabalizing Cycles defines for how many consecutive tracking intervals the Eye Tracking status has to be \"Compensated\" or \"Good\" before tracking of gaze resumes.");
+                fs.WriteLine("; 1 cycle is 10 milliseconds for DoubleTime=false and 5 milliseconds for DoubleTime=true");
+                fs.WriteLine("; This can visually freeze your gaze when set too high or with unstable tracking, so use with caution!");
+                fs.WriteLine($"StabalizingCycles={stabalizingCycles}");
 
                 fs.WriteLine("");
                 fs.WriteLine("; EyeLidStrat defines how the module calculates the Openness Value");
@@ -159,6 +167,8 @@ namespace VRCFTVarjoModule
                 {
                     fs = new StreamReader(path, Encoding.UTF8);
                     bool correctSection = false, finished = false;
+                    float _squeezeT = 0.15f, _widenT = 0.9f;
+
                     // continue reading the file until we either reach the end, or finished the correct parsing group
                     while (!fs.EndOfStream && !finished)
                     {
@@ -193,51 +203,54 @@ namespace VRCFTVarjoModule
                                 case "doubletime":
                                     readDelay = ParseStringToBool(value) ? 5 : 10;
                                     break;
+                                case "stabalizingcycles":{
+                                        if (uint.TryParse(value, _formatProvider, out var pval))
+                                        {
+                                            stabalizingCycles = pval;
+                                        }
+                                        else Logger.LogWarning($"{value} not a valid value for StabalizingCycles");
+                                        break;
+                                    }
                                 case "eyelidstrat":
                                     {
                                         var strat = StringToOpennessStrat(value);
-                                        if (strat == OpennessStrategy.INVALID)
-                                        {
-                                            Logger.LogWarning($"{value} is not a valid EyeLidStrat!");
-                                        }
-                                        else
+                                        if (strat != OpennessStrategy.INVALID)
                                         {
                                             opennessStrategy = strat;
                                         }
+                                        else Logger.LogWarning($"{value} is not a valid EyeLidStrat!");
                                         break;
                                     }
                                 case "squeezethreshold":
                                     {
                                         if (float.TryParse(value, _formatProvider, out var pval))
                                         {
-                                            if (pval > 0.5 || pval > widenThreshold)
+                                            if (pval < 0 || pval > 1)
                                             {
-                                                Logger.LogWarning($"SqueezeThreshold must less then 0.5 and WidenThreshold");
+                                                Logger.LogWarning("SqueezeThreshold may not be <0 or >1");
                                             }
                                             else
                                             {
-                                                squeezeThreshold = pval;
-                                                opennessRange = widenThreshold - squeezeThreshold;
+                                                _squeezeT = pval;
                                             }
                                         }
-                                        else Logger.LogWarning($"{value} is not a valid Float!");
+                                        else Logger.LogWarning($"{value} is not a valid Float! (for SqueezeThreshold)");
                                         break;
                                     }
                                 case "widenthreshold":
                                     {
                                         if (float.TryParse(value, _formatProvider, out var pval)) 
                                         {
-                                            if (pval < 0.5 || pval < squeezeThreshold)
+                                            if (pval < 0 || pval >1)
                                             {
-                                                Logger.LogWarning($"WidenThreshold must larger then 0.5 and SqueezeThreshold");
+                                                Logger.LogWarning("WidenThreshold may not be <0 or >1");
                                             }
                                             else
                                             {
-                                                widenThreshold = pval;
-                                                opennessRange = widenThreshold - squeezeThreshold;
+                                                _widenT = pval;
                                             }
                                         }
-                                        else Logger.LogWarning($"{value} is not a valid Float!");
+                                        else Logger.LogWarning($"{value} is not a valid Float! (for WidenThreshold)");
                                         break;
                                     }
                                 case "maxopenspeed":
@@ -246,11 +259,11 @@ namespace VRCFTVarjoModule
                                         {
                                             if (pval < 0 || pval > 1)
                                             {
-                                                Logger.LogWarning($"MaxOpenSpeed may not be <0 or >1");
+                                                Logger.LogWarning("MaxOpenSpeed may not be <0 or >1");
                                             }
                                             maxOpenSpeed = pval;
                                         }
-                                        else Logger.LogWarning($"{value} is not a valid Float!");
+                                        else Logger.LogWarning($"{value} is not a valid Float! (for MaxOpenSpeed)");
                                         break;
                                     }
                                 default:
@@ -258,6 +271,17 @@ namespace VRCFTVarjoModule
                                     break;
                             }
                         }
+                    }
+
+                    if (_squeezeT > _widenT)
+                    {
+                        squeezeThreshold = _squeezeT;
+                        widenThreshold = _widenT;
+                        opennessRange = _widenT - _squeezeT;
+                    }
+                    else
+                    {
+                        Logger.LogWarning("SqueezeThreshold may not be larger then WidenThreshold!");
                     }
                 }
                 catch

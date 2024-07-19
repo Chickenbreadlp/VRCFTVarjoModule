@@ -15,6 +15,7 @@ namespace VRCFTVarjoModule
     public static class TrackingData
     {
         internal static ConfigManager Config { get; set; }
+        internal static uint leftTimeoutCycles = 0, rightTimeoutCycles = 0;
 
         /// <summary>
         /// Function to map a Varjo GazeRay to a Vector2 Ray for use in VRCFT
@@ -35,7 +36,7 @@ namespace VRCFTVarjoModule
         /// <param name="externalOpenness">Recorded openness value from Varjo</param>
         /// <param name="eyeStatus">Tracking status of the eye</param>
         /// <returns></returns>
-        private static (float openness, float squeeze, float widen) ParseOpenness(float currentOpenness, float externalOpenness, GazeEyeStatus eyeStatus)
+        private static (float openness, float squeeze, float widen) ParseOpenness(float currentOpenness, float externalOpenness, GazeEyeStatus eyeStatus, uint timeoutCycles)
         {
             float parsedOpenness;
             float widen = 0f;
@@ -63,7 +64,7 @@ namespace VRCFTVarjoModule
                 case OpennessStrategy.RestrictedSpeed:
                     {
                         // Check if new Openness is within allowable margin
-                        if (eyeStatus <= GazeEyeStatus.Visible && parsedOpenness >= currentOpenness + Config.maxOpenSpeed)
+                        if ((eyeStatus <= GazeEyeStatus.Visible || timeoutCycles != 0) && parsedOpenness >= currentOpenness + Config.maxOpenSpeed)
                         {
                             // And if not set the openness to -1 to indicate no changes
                             parsedOpenness = -1f;
@@ -107,14 +108,25 @@ namespace VRCFTVarjoModule
             // Set the Gaze and Pupil Size for each eye when their status is somewhat reliable according to the SDK
             if (external.rightStatus >= GazeEyeStatus.Compensated)
             {
-                data.Right.Gaze = GetGazeVector(external.rightEye);
-                data.Right.PupilDiameter_MM = externalMeasurements.rightPupilDiameterInMM;
+                if (rightTimeoutCycles == 0)
+                {
+                    data.Right.Gaze = GetGazeVector(external.rightEye);
+                    data.Right.PupilDiameter_MM = externalMeasurements.rightPupilDiameterInMM;
+                }
+                else rightTimeoutCycles--;
             }
+            else rightTimeoutCycles = Config.stabalizingCycles;
+
             if (external.leftStatus >= GazeEyeStatus.Compensated)
             {
-                data.Left.Gaze = GetGazeVector(external.leftEye);
-                data.Left.PupilDiameter_MM = externalMeasurements.leftPupilDiameterInMM;
+                if (leftTimeoutCycles == 0)
+                {
+                    data.Left.Gaze = GetGazeVector(external.leftEye);
+                    data.Left.PupilDiameter_MM = externalMeasurements.leftPupilDiameterInMM;
+                }
+                else leftTimeoutCycles--;
             }
+            else leftTimeoutCycles = Config.stabalizingCycles;
 
             // Parse openness as boolean or float depending on config
             switch (Config.opennessStrategy)
@@ -131,8 +143,8 @@ namespace VRCFTVarjoModule
 
                 default:
                     // Parse Openness and store them in temporary variables
-                    (float rightOpenness, float rightSqueeze, float rightWiden) = ParseOpenness(data.Right.Openness, externalMeasurements.rightEyeOpenness, external.rightStatus);
-                    (float leftOpenness, float leftSqueeze, float leftWiden) = ParseOpenness(data.Left.Openness, externalMeasurements.leftEyeOpenness, external.leftStatus);
+                    (float rightOpenness, float rightSqueeze, float rightWiden) = ParseOpenness(data.Right.Openness, externalMeasurements.rightEyeOpenness, external.rightStatus, rightTimeoutCycles);
+                    (float leftOpenness, float leftSqueeze, float leftWiden) = ParseOpenness(data.Left.Openness, externalMeasurements.leftEyeOpenness, external.leftStatus, leftTimeoutCycles);
 
                     // Set Openness Values for each eye; if they should change
                     if (rightOpenness >= 0.0f)
