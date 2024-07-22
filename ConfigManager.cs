@@ -14,7 +14,8 @@ namespace VRCFTVarjoModule
         protected string path;
 
         protected bool shouldCreateLink;
-        public int readDelay {  get; protected set; }
+        public int readDelay { get; protected set; }
+        public bool pickyTracking { get; protected set; }
         public uint stabalizingCycles { get; protected set; }
         public OpennessStrategy opennessStrategy { get; protected set; }
 
@@ -47,6 +48,7 @@ namespace VRCFTVarjoModule
         {
             shouldCreateLink = true;
             readDelay = 10;
+            pickyTracking = false;
             stabalizingCycles = 0;
             opennessStrategy = OpennessStrategy.RestrictedSpeed;
             squeezeThreshold = 0.15f;
@@ -79,9 +81,15 @@ namespace VRCFTVarjoModule
                 fs.WriteLine($"DoubleTime={readDelay == 5}");
 
                 fs.WriteLine("");
+                fs.WriteLine("; Picky Tracking makes the module only consider the best Tracking status for gaze.");
+                fs.WriteLine("; There seems to be prescedent that for some people the tracking Status \"Compensated\" is leading to very random glitches in the gaze data");
+                fs.WriteLine("; This Option should *hopefully* fix this. (this setting applies to Gaze ONLY and has no effect on the Lid strats)");
+                fs.WriteLine($"PickyTracking={pickyTracking}");
+
+                fs.WriteLine("");
                 fs.WriteLine("; Stabalizing Cycles defines for how many consecutive tracking intervals the Eye Tracking status has to be \"Compensated\" or \"Good\" before tracking of gaze resumes.");
                 fs.WriteLine("; 1 cycle is 10 milliseconds for DoubleTime=false and 5 milliseconds for DoubleTime=true");
-                fs.WriteLine("; This can visually freeze your gaze when set too high or with unstable tracking, so use with caution!");
+                fs.WriteLine("; This can visually freeze your gaze when set too high or with unstable tracking, so use with caution! (also affects Eye Lid Strat: RestrictedSpeed)");
                 fs.WriteLine($"StabalizingCycles={stabalizingCycles}");
 
                 fs.WriteLine("");
@@ -202,6 +210,9 @@ namespace VRCFTVarjoModule
                                     break;
                                 case "doubletime":
                                     readDelay = ParseStringToBool(value) ? 5 : 10;
+                                    break;
+                                case "pickytracking":
+                                    pickyTracking = ParseStringToBool(value);
                                     break;
                                 case "stabalizingcycles":{
                                         if (uint.TryParse(value, _formatProvider, out var pval))

@@ -16,6 +16,7 @@ namespace VRCFTVarjoModule
     {
         internal static ConfigManager Config { get; set; }
         internal static uint leftTimeoutCycles = 0, rightTimeoutCycles = 0;
+        internal static GazeEyeStatus validGazeStatus { get; set; }
 
         /// <summary>
         /// Function to map a Varjo GazeRay to a Vector2 Ray for use in VRCFT
@@ -106,7 +107,7 @@ namespace VRCFTVarjoModule
         public static void Update(ref UnifiedEyeData data, ref UnifiedExpressionShape[] expressionData, GazeData external, EyeMeasurements externalMeasurements)
         {
             // Set the Gaze and Pupil Size for each eye when their status is somewhat reliable according to the SDK
-            if (external.rightStatus >= GazeEyeStatus.Compensated)
+            if (external.rightStatus >= validGazeStatus)
             {
                 if (rightTimeoutCycles == 0)
                 {
@@ -117,7 +118,7 @@ namespace VRCFTVarjoModule
             }
             else rightTimeoutCycles = Config.stabalizingCycles;
 
-            if (external.leftStatus >= GazeEyeStatus.Compensated)
+            if (external.leftStatus >= validGazeStatus)
             {
                 if (leftTimeoutCycles == 0)
                 {
@@ -191,6 +192,7 @@ namespace VRCFTVarjoModule
             config = new ConfigManager(Logger);
             Logger.LogInformation($"Testing Config: {config.readDelay}");
             TrackingData.Config = config;
+            TrackingData.validGazeStatus = config.pickyTracking ? GazeEyeStatus.Tracked : GazeEyeStatus.Compensated;
 
             // Init our tracker first
             tracker = new VarjoNativeInterface();
