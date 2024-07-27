@@ -16,6 +16,9 @@ namespace VRCFTVarjoModule
     {
         internal static ConfigManager Config { get; set; }
         internal static uint leftTimeoutCycles = 0, rightTimeoutCycles = 0;
+        internal static bool isTrackingLeft = false, isTrackingRight = false;
+        internal static Vector2 refGazeLeft = new Vector2(0, 0), refGazeRight = new Vector2(0, 0);
+        internal static Vector2 gazeLeft = new Vector2(0, 0), gazeRight = new Vector2(0, 0);
         internal static GazeEyeStatus validGazeStatus { get; set; }
 
         /// <summary>
@@ -106,28 +109,57 @@ namespace VRCFTVarjoModule
         /// <param name="externalMeasurements">Auxillary Varjo measurements object</param>
         public static void Update(ref UnifiedEyeData data, ref UnifiedExpressionShape[] expressionData, GazeData external, EyeMeasurements externalMeasurements)
         {
-            // Set the Gaze and Pupil Size for each eye when their status is somewhat reliable according to the SDK
+            // Detect which eye is tracked depending on if their status is somewhat reliable according to the SDK
+            isTrackingRight = false;
             if (external.rightStatus >= validGazeStatus)
             {
-                if (rightTimeoutCycles == 0)
-                {
-                    data.Right.Gaze = GetGazeVector(external.rightEye);
-                    data.Right.PupilDiameter_MM = externalMeasurements.rightPupilDiameterInMM;
-                }
+                if (rightTimeoutCycles == 0) isTrackingRight = true;
                 else rightTimeoutCycles--;
             }
             else rightTimeoutCycles = Config.stabalizingCycles;
 
+            isTrackingLeft = false;
             if (external.leftStatus >= validGazeStatus)
             {
-                if (leftTimeoutCycles == 0)
-                {
-                    data.Left.Gaze = GetGazeVector(external.leftEye);
-                    data.Left.PupilDiameter_MM = externalMeasurements.leftPupilDiameterInMM;
-                }
+                if (leftTimeoutCycles == 0) isTrackingLeft = true;
                 else leftTimeoutCycles--;
             }
             else leftTimeoutCycles = Config.stabalizingCycles;
+
+
+            // Set the Gaze and Pupil Size for each eye
+            if (isTrackingRight && isTrackingLeft)
+            {
+                gazeRight = GetGazeVector(external.rightEye);
+                gazeLeft = GetGazeVector(external.leftEye);
+                refGazeRight = gazeRight;
+                refGazeLeft = gazeLeft;
+                data.Right.Gaze = gazeRight;
+                data.Right.PupilDiameter_MM = externalMeasurements.rightPupilDiameterInMM;
+                data.Left.Gaze = gazeLeft;
+                data.Left.PupilDiameter_MM = externalMeasurements.leftPupilDiameterInMM;
+            }
+            else if (isTrackingRight)
+            {
+                gazeRight = GetGazeVector(external.rightEye);
+                data.Right.Gaze = gazeRight;
+                data.Right.PupilDiameter_MM = externalMeasurements.rightPupilDiameterInMM;
+                if (Config.untrackedEyeFollowTracked)
+                {
+                    data.Left.Gaze = (gazeRight - refGazeRight) + refGazeLeft;
+                }
+            }
+            else if (isTrackingLeft)
+            {
+                gazeLeft = GetGazeVector(external.leftEye);
+                data.Left.Gaze = gazeLeft;
+                data.Left.PupilDiameter_MM = externalMeasurements.leftPupilDiameterInMM;
+                if (Config.untrackedEyeFollowTracked)
+                {
+                    data.Right.Gaze = (gazeLeft - refGazeLeft) + refGazeRight;
+                }
+            }
+
 
             // Parse openness as boolean or float depending on config
             switch (Config.opennessStrategy)
