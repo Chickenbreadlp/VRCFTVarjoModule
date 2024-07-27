@@ -17,6 +17,7 @@ namespace VRCFTVarjoModule
         public int readDelay { get; protected set; }
         public bool pickyTracking { get; protected set; }
         public uint stabalizingCycles { get; protected set; }
+        public bool untrackedEyeFollowTracked { get; protected set; }
         public OpennessStrategy opennessStrategy { get; protected set; }
 
         // Magic numbers for float lid parsing
@@ -50,6 +51,7 @@ namespace VRCFTVarjoModule
             readDelay = 10;
             pickyTracking = false;
             stabalizingCycles = 0;
+            untrackedEyeFollowTracked = false;
             opennessStrategy = OpennessStrategy.RestrictedSpeed;
             squeezeThreshold = 0.15f;
             widenThreshold = 0.9f;
@@ -91,6 +93,12 @@ namespace VRCFTVarjoModule
                 fs.WriteLine("; 1 cycle is 10 milliseconds for DoubleTime=false and 5 milliseconds for DoubleTime=true");
                 fs.WriteLine("; This can visually freeze your gaze when set too high or with unstable tracking, so use with caution! (also affects Eye Lid Strat: RestrictedSpeed)");
                 fs.WriteLine($"StabalizingCycles={stabalizingCycles}");
+
+                fs.WriteLine("");
+                fs.WriteLine("; If one eye temporary lost tracking while the other is still tracked, this option will make the untracked eye try to follow the tracked one during that time.");
+                fs.WriteLine("; This option can be especially useful in combination with PickyTracking.");
+                fs.WriteLine("; (this setting applies to Gaze ONLY and has no effect on the Lid strats)");
+                fs.WriteLine($"UntrackedEyeFollowTracked={untrackedEyeFollowTracked}");
 
                 fs.WriteLine("");
                 fs.WriteLine("; EyeLidStrat defines how the module calculates the Openness Value");
@@ -222,6 +230,9 @@ namespace VRCFTVarjoModule
                                         else Logger.LogWarning($"{value} not a valid value for StabalizingCycles");
                                         break;
                                     }
+                                case "untrackedeyefollowtracked":
+                                    untrackedEyeFollowTracked = ParseStringToBool(value);
+                                    break;
                                 case "eyelidstrat":
                                     {
                                         var strat = StringToOpennessStrat(value);
