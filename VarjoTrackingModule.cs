@@ -147,7 +147,6 @@ namespace VRCFTVarjoModule
                 if (Config.untrackedEyeFollowTracked)
                 {
                     data.Left.Gaze = (gazeRight - refGazeRight) + refGazeLeft;
-                    data.Left.PupilDiameter_MM = externalMeasurements.rightPupilDiameterInMM;
                 }
             }
             else if (isTrackingLeft)
@@ -158,7 +157,6 @@ namespace VRCFTVarjoModule
                 if (Config.untrackedEyeFollowTracked)
                 {
                     data.Right.Gaze = (gazeLeft - refGazeLeft) + refGazeRight;
-                    data.Right.PupilDiameter_MM = externalMeasurements.leftPupilDiameterInMM;
                 }
             }
 
