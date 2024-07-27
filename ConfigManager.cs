@@ -295,7 +295,7 @@ namespace VRCFTVarjoModule
                         }
                     }
 
-                    if (_squeezeT > _widenT)
+                    if (_squeezeT < _widenT)
                     {
                         squeezeThreshold = _squeezeT;
                         widenThreshold = _widenT;
