@@ -19,7 +19,6 @@ namespace VRCFTVarjoModule
         internal static bool isTrackingLeft = false, isTrackingRight = false;
         internal static Vector2 refGazeLeft = new Vector2(0, 0), refGazeRight = new Vector2(0, 0);
         internal static Vector2 gazeLeft = new Vector2(0, 0), gazeRight = new Vector2(0, 0);
-        internal static GazeEyeStatus validGazeStatus { get; set; }
 
         /// <summary>
         /// Function to map a Varjo GazeRay to a Vector2 Ray for use in VRCFT
@@ -111,7 +110,7 @@ namespace VRCFTVarjoModule
         {
             // Detect which eye is tracked depending on if their status is somewhat reliable according to the SDK
             isTrackingRight = false;
-            if (external.rightStatus >= validGazeStatus)
+            if (external.rightStatus >= Config.validGazeStatus)
             {
                 if (rightTimeoutCycles == 0) isTrackingRight = true;
                 else rightTimeoutCycles--;
@@ -119,7 +118,7 @@ namespace VRCFTVarjoModule
             else rightTimeoutCycles = Config.stabalizingCycles;
 
             isTrackingLeft = false;
-            if (external.leftStatus >= validGazeStatus)
+            if (external.leftStatus >= Config.validGazeStatus)
             {
                 if (leftTimeoutCycles == 0) isTrackingLeft = true;
                 else leftTimeoutCycles--;
@@ -222,18 +221,22 @@ namespace VRCFTVarjoModule
         {
             // as the very first thing: Init the config manager
             config = new ConfigManager(Logger);
-            Logger.LogInformation($"Testing Config: {config.readDelay}");
             TrackingData.Config = config;
-            TrackingData.validGazeStatus = config.pickyTracking ? GazeEyeStatus.Tracked : GazeEyeStatus.Compensated;
 
             // Init our tracker first
             tracker = new VarjoNativeInterface();
-            bool pipeConnected = tracker.Initialize(Logger);
+            // When the readDelay is 5, then we should init Tracking at 200Hz
+            bool pipeConnected = tracker.Initialize(Logger, config.readDelay == 5);
 
             if (pipeConnected)
             {
                 // if the tracker has init'ed, get the first 4 chars of the HMD name for Icon and Module name (for VR-#, XR-# or AERO)
-                string hmdName = tracker.GetHMDName().Substring(0, 4);
+                string hmdName = tracker.GetHMDName();
+
+                // if VB is running but no headset is connected, we will get an empty HMD name, so only attempt to trim if longer then 4 characters *sigh*
+                if (hmdName.Length > 4) {
+                    hmdName = hmdName.Substring(0, 4);
+                }
 
                 // in case we're dealing with the Aero, capitilize the name properly
                 if (hmdName == "AERO") hmdName = "Aero";

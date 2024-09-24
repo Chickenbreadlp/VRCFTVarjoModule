@@ -15,7 +15,7 @@ namespace VRCFTVarjoModule
 
         protected bool shouldCreateLink;
         public int readDelay { get; protected set; }
-        public bool pickyTracking { get; protected set; }
+        public GazeEyeStatus validGazeStatus { get; protected set; }
         public uint stabalizingCycles { get; protected set; }
         public bool untrackedEyeFollowTracked { get; protected set; }
         public OpennessStrategy opennessStrategy { get; protected set; }
@@ -49,9 +49,9 @@ namespace VRCFTVarjoModule
         {
             shouldCreateLink = true;
             readDelay = 10;
-            pickyTracking = false;
-            stabalizingCycles = 0;
-            untrackedEyeFollowTracked = false;
+            validGazeStatus = GazeEyeStatus.Tracked;
+            stabalizingCycles = 1;
+            untrackedEyeFollowTracked = true;
             opennessStrategy = OpennessStrategy.RestrictedSpeed;
             squeezeThreshold = 0.15f;
             widenThreshold = 0.9f;
@@ -78,18 +78,19 @@ namespace VRCFTVarjoModule
                 fs.WriteLine($"CreateLink={shouldCreateLink}");
 
                 fs.WriteLine("");
-                fs.WriteLine("; Double Time is an experimental option which lets the module read from the SDK 2x normal (200Hz)");
-                fs.WriteLine("; This setting will do nothing but increase CPU time on VB versions older then 4.1");
+                fs.WriteLine("; Double Time is an experimental option which lets the module run at 200Hz");
+                fs.WriteLine("; By default the module will init ET at 100Hz and read at that frequency, but if you're so inclined you can make the module run at 200Hz with this option");
+                fs.WriteLine("; Note: if your headset is a VR-1, VR-2 or XR-1, then this option will only increase CPU load, as these headsets max out at 100Hz");
                 fs.WriteLine($"DoubleTime={readDelay == 5}");
 
                 fs.WriteLine("");
-                fs.WriteLine("; Picky Tracking makes the module only consider the best Tracking status for gaze.");
-                fs.WriteLine("; There seems to be prescedent that for some people the tracking Status \"Compensated\" is leading to very random glitches in the gaze data");
-                fs.WriteLine("; This Option should *hopefully* fix this. (this setting applies to Gaze ONLY and has no effect on the Lid strats)");
-                fs.WriteLine($"PickyTracking={pickyTracking}");
+                fs.WriteLine("; Picky Tracking makes the module only consider tracking data that the Varjo SDK is most confident of.");
+                fs.WriteLine("; Previously, the module by default also used \"Compensated\" tracking values from the Varjo SDK.");
+                fs.WriteLine("; However more recent versions of VB seems to break these tracking points, hence the new default. If you want to return to the previous behaviour, turn this option off.");
+                fs.WriteLine($"PickyTracking={validGazeStatus == GazeEyeStatus.Tracked}");
 
                 fs.WriteLine("");
-                fs.WriteLine("; Stabalizing Cycles defines for how many consecutive tracking intervals the Eye Tracking status has to be \"Compensated\" or \"Good\" before tracking of gaze resumes.");
+                fs.WriteLine("; Stabalizing Cycles defines for how many consecutive tracking intervals the Eye Tracking status has to be in the status the module considers usable before tracking of gaze resumes.");
                 fs.WriteLine("; 1 cycle is 10 milliseconds for DoubleTime=false and 5 milliseconds for DoubleTime=true");
                 fs.WriteLine("; This can visually freeze your gaze when set too high or with unstable tracking, so use with caution! (also affects Eye Lid Strat: RestrictedSpeed)");
                 fs.WriteLine($"StabalizingCycles={stabalizingCycles}");
@@ -183,7 +184,7 @@ namespace VRCFTVarjoModule
                 {
                     fs = new StreamReader(path, Encoding.UTF8);
                     bool correctSection = false, finished = false;
-                    float _squeezeT = 0.15f, _widenT = 0.9f;
+                    float _squeezeTemp = 0.15f, _widenTemp = 0.9f;
 
                     // continue reading the file until we either reach the end, or finished the correct parsing group
                     while (!fs.EndOfStream && !finished)
@@ -220,7 +221,9 @@ namespace VRCFTVarjoModule
                                     readDelay = ParseStringToBool(value) ? 5 : 10;
                                     break;
                                 case "pickytracking":
-                                    pickyTracking = ParseStringToBool(value);
+                                    validGazeStatus = ParseStringToBool(value)
+                                        ? GazeEyeStatus.Tracked
+                                        : GazeEyeStatus.Compensated;
                                     break;
                                 case "stabalizingcycles":{
                                         if (uint.TryParse(value, _formatProvider, out var pval))
@@ -253,7 +256,7 @@ namespace VRCFTVarjoModule
                                             }
                                             else
                                             {
-                                                _squeezeT = pval;
+                                                _squeezeTemp = pval;
                                             }
                                         }
                                         else Logger.LogWarning($"{value} is not a valid Float! (for SqueezeThreshold)");
@@ -269,7 +272,7 @@ namespace VRCFTVarjoModule
                                             }
                                             else
                                             {
-                                                _widenT = pval;
+                                                _widenTemp = pval;
                                             }
                                         }
                                         else Logger.LogWarning($"{value} is not a valid Float! (for WidenThreshold)");
@@ -295,11 +298,11 @@ namespace VRCFTVarjoModule
                         }
                     }
 
-                    if (_squeezeT < _widenT)
+                    if (_squeezeTemp < _widenTemp)
                     {
-                        squeezeThreshold = _squeezeT;
-                        widenThreshold = _widenT;
-                        opennessRange = _widenT - _squeezeT;
+                        squeezeThreshold = _squeezeTemp;
+                        widenThreshold = _widenTemp;
+                        opennessRange = _widenTemp - _squeezeTemp;
                     }
                     else
                     {

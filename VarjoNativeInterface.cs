@@ -15,7 +15,7 @@ namespace VRCFTVarjoModule
         protected ILogger Logger;
 
         #region Lifetime methods (Init, Update, Teardown)
-        public bool Initialize(ILogger loggerInstance)
+        public bool Initialize(ILogger loggerInstance, bool use200Hz = false)
         {
             Logger = loggerInstance;
 
@@ -36,7 +36,25 @@ namespace VRCFTVarjoModule
                     Logger.LogError("Gaze tracking is not allowed! Please enable it in the Varjo Base!");
                     return false;
                 }
-                varjo_GazeInit(_session);
+
+                // Prep the Init Parameters first
+                GazeParameter frequency = new GazeParameter(VarjoGazeParameterKey.OutputFrequency);
+                if (use200Hz)
+                {
+                    // Don't set a fixed 200Hz tracking rate here, or otherwise the module breaks on 100Hz ET headsets
+                    // Instead use maximum supported
+                    frequency.value = GazeOutputFrequency.MaximumSupported;
+                }
+                else
+                {
+                    frequency.value = GazeOutputFrequency.Frequency100Hz;
+                }
+                GazeParameter[] parameters = {
+                    frequency
+                };
+
+                varjo_GazeInitWithParameters(_session, parameters, parameters.Length);
+
                 varjo_SyncProperties(_session);
 
                 return true;
@@ -146,6 +164,9 @@ namespace VRCFTVarjoModule
 
         [DllImport("VarjoLib", CharSet = CharSet.Auto)]
         private static extern void varjo_GazeInit(IntPtr session);
+
+        [DllImport("VarjoLib", CharSet = CharSet.Auto)]
+        private static extern void varjo_GazeInitWithParameters(IntPtr session, [In, Out] GazeParameter[] parameters, int parameterCount);
 
         [DllImport("VarjoLib", CharSet = CharSet.Auto)]
         private static extern int varjo_GetError(IntPtr session);

@@ -83,17 +83,37 @@ namespace VRCFTVarjoModule
         Fast
     };
 
-    public enum GazeOutputFilterType
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct GazeParameter
     {
-        None,
-        Standard
+        [MarshalAs(UnmanagedType.LPStr)] public string key;
+        [MarshalAs(UnmanagedType.LPStr)] public string value;
+
+        public GazeParameter(string key)
+        {
+            this.key = key;
+            this.value = "";
+        }
     }
 
-    public enum GazeOutputFrequency
+    public static class VarjoGazeParameterKey
     {
-        MaximumSupported,
-        Frequency100Hz,
-        Frequency200Hz
+        public static readonly string OutputFrequency = "OutputFrequency";
+        public static readonly string OutputFilterType = "OutputFilterType";
+    }
+
+    public static class GazeOutputFilterType
+    {
+        public static readonly string None = "None";
+        public static readonly string Standard = "Standard";
+    }
+
+    public static class GazeOutputFrequency
+    {
+        public static readonly string MaximumSupported = "OutputFrequencyMaximumSupported";
+        public static readonly string Frequency100Hz = "OutputFrequency100Hz";
+        public static readonly string Frequency200Hz = "OutputFrequency200Hz";
     }
 
     public enum GazeEyeCalibrationQuality
