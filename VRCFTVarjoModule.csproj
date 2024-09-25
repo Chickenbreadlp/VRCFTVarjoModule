@@ -31,11 +31,6 @@
     </None>
   </ItemGroup>
   <ItemGroup>
-    <None Include="module.json">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
-  </ItemGroup>
-  <ItemGroup>
     <EmbeddedResource Include="Assets\*" />
   </ItemGroup>
   <ItemGroup>
